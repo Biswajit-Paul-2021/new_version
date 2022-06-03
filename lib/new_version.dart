@@ -4,13 +4,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
 
-import 'package:collection/collection.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:html/parser.dart' show parse;
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:url_launcher/url_launcher_string.dart';
 
 /// Information about the app's current version, and the most recent version
 /// available in the Apple App Store or Google Play Store.
@@ -100,7 +98,7 @@ class NewVersion {
   /// This checks the version status and returns the information. This is useful
   /// if you want to display a custom alert, or use the information in a different
   /// way.
-  Future<VersionStatus?> getVersionStatus() async {
+  FutureOr<VersionStatus?> getVersionStatus() async {
     PackageInfo packageInfo = await PackageInfo.fromPlatform();
     if (Platform.isIOS) {
       return _getiOSStoreVersion(packageInfo);
@@ -110,6 +108,7 @@ class NewVersion {
       debugPrint(
           'The target platform "${Platform.operatingSystem}" is not yet supported by this package.');
     }
+    return null;
   }
 
   /// This function attempts to clean local version strings so they match the MAJOR.MINOR.PATCH
@@ -121,7 +120,10 @@ class NewVersion {
   /// JSON document.
   Future<VersionStatus?> _getiOSStoreVersion(PackageInfo packageInfo) async {
     final id = iOSId ?? packageInfo.packageName;
-    final parameters = {"bundleId": "$id"};
+    final parameters = {
+      "bundleId": "$id",
+      "timestamp": "${DateTime.now().millisecondsSinceEpoch}"
+    };
     if (iOSAppStoreCountry != null) {
       parameters.addAll({"country": iOSAppStoreCountry!});
     }
@@ -150,35 +152,57 @@ class NewVersion {
   Future<VersionStatus?> _getAndroidStoreVersion(
       PackageInfo packageInfo) async {
     final id = androidId ?? packageInfo.packageName;
-    final uri =
-        Uri.https("play.google.com", "/store/apps/details", {"id": "$id"});
-    final response = await http.get(uri);
-    if (response.statusCode != 200) {
-      debugPrint('Can\'t find an app in the Play Store with the id: $id');
+    // final uri =
+    //     Uri.https("play.google.com", "/store/apps/details", {"id": "$id"});
+    // final response = await http.get(uri);
+    // if (response.statusCode != 200) {
+    //   debugPrint('Can\'t find an app in the Play Store with the id: $id');
+    //   return null;
+    // }
+    // final document = parse(response.body);
+
+    // final additionalInfoElements = document.getElementsByClassName('hAyfc');
+    // final versionElement = additionalInfoElements.firstWhere(
+    //   (elm) => elm.querySelector('.BgcNfc')!.text == 'Current Version',
+    // );
+    // final storeVersion = versionElement.querySelector('.htlgb')!.text;
+
+    // final sectionElements = document.getElementsByClassName('W4P4ne');
+    // final releaseNotesElement = sectionElements.firstWhereOrNull(
+    //   (elm) => elm.querySelector('.wSaTQd')!.text == 'What\'s New',
+    // );
+    // final releaseNotes = releaseNotesElement
+    //     ?.querySelector('.PHBdkd')
+    //     ?.querySelector('.DWPxHb')
+    //     ?.text;
+
+    Uri uri = Uri.https(
+      "play.google.com",
+      "/store/apps/details",
+      {"id": id, "timestamp": "${DateTime.now().millisecondsSinceEpoch}"},
+    );
+    String? version = '';
+    try {
+      final response = await http.get(uri);
+      if (response.statusCode != 200) {
+        debugPrint("Can't find an app in the Play Store with the id: $id");
+        return null;
+      } else {
+        version = RegExp(r',\[\[\["([0-9,\.]*)"]],')
+            .firstMatch(response.body)!
+            .group(1);
+        //url = uri.toString();
+      }
+    } catch (e) {
+      debugPrint('$e');
       return null;
     }
-    final document = parse(response.body);
-
-    final additionalInfoElements = document.getElementsByClassName('hAyfc');
-    final versionElement = additionalInfoElements.firstWhere(
-      (elm) => elm.querySelector('.BgcNfc')!.text == 'Current Version',
-    );
-    final storeVersion = versionElement.querySelector('.htlgb')!.text;
-
-    final sectionElements = document.getElementsByClassName('W4P4ne');
-    final releaseNotesElement = sectionElements.firstWhereOrNull(
-      (elm) => elm.querySelector('.wSaTQd')!.text == 'What\'s New',
-    );
-    final releaseNotes = releaseNotesElement
-        ?.querySelector('.PHBdkd')
-        ?.querySelector('.DWPxHb')
-        ?.text;
 
     return VersionStatus._(
       localVersion: _getCleanVersion(packageInfo.version),
-      storeVersion: _getCleanVersion(forceAppVersion ?? storeVersion),
+      storeVersion: _getCleanVersion(forceAppVersion ?? version ?? ''),
       appStoreLink: uri.toString(),
-      releaseNotes: releaseNotes,
+      releaseNotes: "",
     );
   }
 
@@ -265,8 +289,8 @@ class NewVersion {
   /// Launches the Apple App Store or Google Play Store page for the app.
   Future<void> launchAppStore(String appStoreLink) async {
     debugPrint(appStoreLink);
-    if (await canLaunch(appStoreLink)) {
-      await launch(appStoreLink);
+    if (await canLaunchUrlString(appStoreLink)) {
+      await launchUrlString(appStoreLink);
     } else {
       throw 'Could not launch appStoreLink';
     }
